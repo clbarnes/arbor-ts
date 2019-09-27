@@ -1,0 +1,19 @@
+root = true
+
+[*]
+end_of_file = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{js,py,rs,md,ts}]
+charset = utf-8
+
+[Makefile]
+indent_style = tab
+
+[*.{js,html,css,tex,md,json,yml,toml,ts}]
+indent_style = space
+indent_size = 2
+
+[*.{js,rs,ts}]
+max_line_length = 80

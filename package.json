@@ -1,0 +1,18 @@
+{
+  "name": "arbor-ts",
+  "version": "0.1.0",
+  "description": "",
+  "main": "arbor.js",
+  "dependencies": {
+    "tsc": "^1.20150623.0"
+  },
+  "devDependencies": {
+    "prettier": "^1.18.2",
+    "typescript": "^3.6.3"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "GPL-3.0-or-later"
+}
