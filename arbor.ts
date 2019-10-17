@@ -12,11 +12,39 @@
  * A node without a parent is the root node, and it is assumed that there is only one.
  */
 
+type Id = number;
+
+class BranchAndEndNodes {
+  ends: Id[];
+  branches: Map<Id, number>;
+  n_branches: number;
+
+  constructor(ends: Id[], branches: Map<Id, number>, n_branches?: number) {
+    this.ends = ends;
+    this.branches = branches;
+    this.n_branches = n_branches || branches.size;
+  }
+}
+
+class Distances {
+  distances: Map<Id, number>;
+  max: number;
+
+  constructor(distances: Map<Id, number>, max: number) {
+    this.distances = distances;
+    this.max = max;
+  }
+}
+
+interface DistanceFunction {
+  (child: Id, parent: Id): number;
+}
+
 class Arbor {
   /** The root node, by definition without a parent and not present in this.edges. */
-  root?: number | null;
+  root: number | null;
   /** Edges from child to parent. */
-  edges: Map<number, number>;
+  edges: Map<Id, Id>;
 
   constructor() {
     this.root = null;
@@ -36,12 +64,12 @@ class Arbor {
    * ones, if any. Otherwise the tree will have multiple disconnected subtrees and
    * not operate according to expectations.
    *
-   * @param {Number[]]} edges An array where every consecutive pair of nodes
+   * @param {Number[]} edges An array where every consecutive pair of nodes
    *                          defines an edge from parent to child. Every edge
    *                          implictly adds its nodes.
    * Returns this.
    */
-  addEdges(edges: number[], accessor: Function): Arbor {
+  addEdges(edges: Id[], accessor: Function): Arbor {
     var length: number = edges.length;
     if (accessor) {
       for (var i = 0; i < length; i += 2) {
@@ -72,7 +100,7 @@ class Arbor {
    *
    * @returns this
    */
-  addPath(path: number[]): Arbor {
+  addPath(path: Id[]): Arbor {
     for (var i = path.length - 2; i > -1; --i) {
       this.edges.set(path[i + 1], path[i]);
     }
@@ -82,7 +110,7 @@ class Arbor {
     return this;
   }
 
-  addPathReversed(path: number[]): Arbor {
+  addPathReversed(path: Id[]): Arbor {
     for (var i = path.length - 2; i > -1; --i) {
       this.edges.set(path[i], path[i + 1]);
     }
@@ -96,8 +124,8 @@ class Arbor {
   /**
    * Compare node using == and not ===, allowing for numbers to be nodes.
    */
-  contains(node: number | string): boolean {
-    return node == this.root || this.edges.hasOwnProperty(node);
+  contains(node: Id): boolean {
+    return node === this.root || this.edges.has(node);
   }
 
   /**
@@ -105,32 +133,29 @@ class Arbor {
    * the root node, or nothing if the tree has a structural error (like a loop)
    * and no root node could be found.
    */
-  findRoot(): number | null {
-    for (var child in this.edges) {
-      if (this.edges.hasOwnProperty(child)) {
-        var paren = this.edges[child];
-        if (!(paren in this.edges)) {
-          return paren;
-        }
+  findRoot(): Id | null {
+    for (let parent of this.edges.values()) {
+      if (!this.edges.has(parent)) {
+        return parent;
       }
     }
     // Handle corner case: no edges
-    return this.root;
+    return this.root || null;
   }
 
   /**
    * Assumes new_root belongs to this Arbor. Returns this.
    */
-  reroot(new_root) {
-    if (new_root == this.root) return this; // == and not === in case nodes are numbers, which get fooled into strings when they are used as keys in a javascript Object
+  reroot(new_root: Id) {
+    if (new_root === this.root) return this;
 
-    var path = [new_root],
-      paren = this.edges[new_root];
+    const path = [new_root];
+    let parent = this.edges.get(new_root);
 
-    while (paren) {
-      delete this.edges[path[path.length - 1]];
-      path.push(paren);
-      paren = this.edges[paren];
+    while (parent) {
+      this.edges.delete(path[path.length - 1]);
+      path.push(parent);
+      parent = this.edges.get(parent);
     }
 
     return this.addPath(path);
@@ -141,18 +166,13 @@ class Arbor {
    * root node.
    */
   findEndNodes() {
-    var edges = this.edges,
-      children = this.childrenArray(),
-      parents = {};
+    const parents = new Set(this.edges.values());
 
-    for (var k = 0, l = children.length; k < l; ++k) {
-      parents[edges[children[k]]] = true;
-    }
-
-    var ends = [];
-    for (var j = 0, l = children.length; j < l; ++j) {
-      var child = children[j];
-      if (undefined === parents[child]) ends.push(child);
+    const ends: Id[] = [];
+    for (let child of this.edges.keys()) {
+      if (!parents.has(child)) {
+        ends.push(child);
+      }
     }
     return ends;
   }
@@ -161,53 +181,41 @@ class Arbor {
    * Return an object with parent node as keys and arrays of children as values.
    * End nodes have empty arrays.
    */
-  allSuccessors = function() {
-    var edges = this.edges,
-      children = this.childrenArray();
-    // Handle corner cases
-    if (0 === children.length) {
+  allSuccessors(): Map<Id, Id[]> {
+    const successors: Map<Id, Id[]> = new Map();
+    if (!this.edges.size) {
       if (this.root) {
-        var a = {};
-        a[this.root] = [];
-        return a;
+        successors.set(this.root, []);
       }
-      return {};
+      return successors;
     }
-    var successors = {};
-    for (var k = 0, l = children.length; k < l; ++k) {
-      var child = children[k],
-        paren = edges[child],
-        succ = successors[paren];
-      if (succ) succ.push(child);
-      else successors[paren] = [child];
-      if (undefined === successors[child]) successors[child] = [];
+
+    for (let [child, parent] of this.edges.entries()) {
+      const arr = successors.get(parent);
+      if (arr === undefined) {
+        successors.set(parent, [child]);
+      } else {
+        arr.push(child);
+      }
     }
     return successors;
-  };
+  }
 
   /**
    * Return a map of node ID vs number of children.
    */
-  allSuccessorsCount() {
-    var edges = this.edges,
-      children = this.childrenArray();
-    // Handle corner cases
-    if (0 === children.length) {
+  allSuccessorsCount(): Map<Id, number> {
+    const successors: Map<Id, number> = new Map();
+    if (!this.edges.size) {
       if (this.root) {
-        var a = {};
-        a[this.root] = [];
-        return a;
+        successors.set(this.root, 0);
       }
-      return {};
+      return successors;
     }
-    var successors = {};
-    for (var k = 0, l = children.length; k < l; ++k) {
-      var child = children[k],
-        paren = edges[child],
-        succ = successors[paren];
-      if (succ) successors[paren] = succ + 1;
-      else successors[paren] = 1;
-      if (undefined === successors[child]) successors[child] = 0;
+
+    for (let parent of this.edges.values()) {
+      let count = successors.get(parent) || 0;
+      successors.set(parent, count + 1);
     }
     return successors;
   }
@@ -216,15 +224,20 @@ class Arbor {
    * Finds the next branch node, starting at node (inclusive).  Assumes the node
    * belongs to the arbor.  Returns null when no branches are found.
    */
-  nextBranchNode(node) {
-    var all_succ = this.allSuccessors(),
-      succ = all_succ[node];
-    while (1 === succ.length) {
-      node = succ[0];
-      succ = all_succ[node];
+  nextBranchNode(node: Id): Id | null {
+    const all_successors = this.allSuccessors();
+    while (true) {
+      let successors = all_successors.get(node) || [];
+      switch (successors.length) {
+        case 0:
+          return null;
+        case 1:
+          node = successors[0];
+          continue;
+        default:
+          return node;
+      }
     }
-    if (succ.length > 1) return node;
-    return null;
   }
 
   /**
@@ -232,32 +245,28 @@ class Arbor {
    * parent as values, or an empty array for an isolated root node. Runs in O(2n)
    * time.
    */
-  allNeighbors() {
-    var edges = this.edges,
-      nodes = this.childrenArray();
-    // Handle corner cases
-    if (0 === nodes.length) {
-      if (this.root) {
-        var a = {};
-        a[this.root] = [];
-        return a;
+  allNeighbors(): Map<Id, Id[]> {
+    const neighbors = new Map();
+
+    for (let [child, parent] of this.edges.entries()) {
+      if (!neighbors.has(child)) {
+        neighbors.set(child, [parent]);
+      } else {
+        neighbors.get(child).push(parent);
       }
-      return {};
+
+      if (!neighbors.has(parent)) {
+        neighbors.set(parent, [child]);
+      } else {
+        neighbors.get(parent).push(child);
+      }
     }
-    var o = {};
-    for (var i = 0; i < nodes.length; ++i) {
-      var node = nodes[i],
-        paren = edges[node], // always exists in well-formed arbors; root node not included in nodes
-        neighbors = o[node],
-        paren_neighbors = o[paren];
-      // Add paren as neighbor of node
-      if (neighbors) neighbors.push(paren);
-      else o[node] = [paren];
-      // Add node as neighbor of parent
-      if (paren_neighbors) paren_neighbors.push(node);
-      else o[paren] = [node];
+
+    if (neighbors.size && this.root) {
+      neighbors.set(this.root, []);
     }
-    return o;
+
+    return neighbors;
   }
 
   /**
@@ -267,50 +276,49 @@ class Arbor {
    *          branches: map of branch node vs count of branches,
    *          n_branches: number of branch nodes}
    */
-  findBranchAndEndNodes() {
-    var edges = this.edges,
-      children = this.childrenArray(),
-      parents = {},
-      branches = {},
-      n_branches = 0,
-      ends = [];
+  findBranchAndEndNodes(): BranchAndEndNodes {
+    const ends: Id[] = [];
+    const branches = new Map();
+    let n_branches = 0;
 
-    for (var i = 0, l = children.length; i < l; ++i) {
-      var paren = edges[children[i]];
-      if (parents[paren]) {
-        var count = branches[paren];
-        if (undefined === count) {
-          branches[paren] = 2;
+    let n_children = this.allSuccessorsCount();
+
+    switch (n_children.size) {
+      case 1:
+        if (this.root) {
+          ends.push(this.root);
+        }
+      case 0:
+        return new BranchAndEndNodes(ends, branches, n_branches);
+    }
+
+    for (let [parent, count] of n_children.entries()) {
+      switch (count) {
+        case 0:
+          ends.push(count);
+          break;
+        case 1:
+          continue;
+        default:
           n_branches += 1;
-        } else branches[paren] = count + 1;
-      } else {
-        parents[paren] = true;
+          branches.set(parent, count);
       }
     }
-
-    for (var i = 0, l = children.length; i < l; ++i) {
-      var node = children[i];
-      if (undefined === parents[node]) ends.push(node);
-    }
-
-    // Corner case: an Arbor with a root and no children
-    if (0 === children.length && this.root) ends.push(this.root);
-
-    return { ends: ends, branches: branches, n_branches: n_branches };
+    return new BranchAndEndNodes(ends, branches, n_branches);
   }
 
   /** Returns a map of branch node vs true.
    * Runs in O(2n) time. */
-  findBranchNodes() {
-    var edges = this.edges,
-      children = this.childrenArray(),
-      parents = {},
-      branches = {};
+  findBranchNodes(): Set<Id> {
+    const parents = new Set();
+    const branches: Set<Id> = new Set();
 
-    for (var i = 0, l = children.length; i < l; ++i) {
-      var paren = edges[children[i]];
-      if (parents[paren]) branches[paren] = true;
-      else parents[paren] = true;
+    for (let parent of this.edges.values()) {
+      if (parents.has(parent)) {
+        branches.add(parent);
+      } else {
+        parents.add(parent);
+      }
     }
 
     return branches;
@@ -323,10 +331,26 @@ class Arbor {
    * argument to get the distances to the root of this Arbor. Invoke with any
    * non-end node to get distances to that node for nodes downstream of it.
    */
-  nodesOrderFrom(root) {
-    return this.nodesDistanceTo(root, function() {
-      return 1;
-    }).distances;
+  nodesOrderFrom(root: Id): Map<Id, number> {
+    return this.nodesDistanceTo(root, () => 1).distances;
+  }
+
+  *depthFirstSearch(root: Id): Generator<[Id, Id]> {
+    const successors = this.allSuccessors();
+
+    const sortFn = (a: number, b: number) => b - a;
+    const getChildTuples = (parent: Id): [Id, Id][] =>
+      (successors.get(parent) || []).sort(sortFn).map(child => [child, parent]);
+
+    const toYield: [Id, Id][] = getChildTuples(root);
+
+    let pair = toYield.pop();
+    while (pair) {
+      const child = pair[0];
+      toYield.push(...getChildTuples(child));
+      yield pair;
+      pair = toYield.pop();
+    }
   }
 
   /**
@@ -335,71 +359,43 @@ class Arbor {
    * a number.  Returns an object containing the distances and the maximum
    * distance.
    */
-  nodesDistanceTo(root, distanceFn) {
-    var distances = {},
-      r = { distances: distances, max: 0 };
+  nodesDistanceTo(root: Id, distanceFn: DistanceFunction): Distances {
+    let max = 0;
+    const distances = new Map([[root, 0]]);
 
-    // Handle corner case:
-    if (!root) return r;
-
-    var successors = this.allSuccessors(),
-      open = [[root, 0]], // likely faster and more memory efficient with a linked list approach using object literals {node: root, distance: 0, next: null}
-      max = 0.000001;
-
-    var next, paren, child, dist, succ;
-
-    while (open.length > 0) {
-      next = open.shift();
-      paren = next[0];
-      dist = next[1];
-      distances[paren] = dist;
-      succ = successors[paren];
-      while (1 === succ.length) {
-        child = succ[0];
-        dist += distanceFn(child, paren);
-        distances[child] = dist;
-        paren = child;
-        succ = successors[paren];
-      }
-      if (0 === succ.length) {
-        // End node
-        max = Math.max(max, dist);
-      } else {
-        // Branch node
-        for (var i = 0; i < succ.length; ++i) {
-          open.push([succ[i], dist + distanceFn(succ[i], paren)]);
-        }
+    for (let [child, parent] of this.depthFirstSearch(root)) {
+      const childDist =
+        (distances.get(parent) || 0) + distanceFn(child, parent);
+      if (childDist > max) {
+        max = childDist;
       }
     }
 
-    r.max = max;
-
-    return r;
+    return new Distances(distances, max);
   }
 
   /**
    * Return an array will all nodes that are not the root.
    */
-  childrenArray() {
-    return Object.keys(this.edges);
+  childrenArray(): number[] {
+    return Array.from(this.edges.keys());
   }
 
   /**
-   * Return an Object with node keys and true values, in O(2n) time.
+   * Return a Set with node keys and true values, in O(2n) time.
    */
-  nodes() {
-    var a = this.nodesArray(),
-      nodes = {};
-    for (var i = 0; i < a.length; ++i) nodes[a[i]] = true;
-    return nodes;
+  nodes(): Set<Id> {
+    return new Set(this.nodesArray());
   }
 
   /**
    * Return an Array of all nodes in O(n) time.
    */
-  nodesArray() {
-    var nodes = Object.keys(this.edges);
-    if (null !== this.root) nodes.push(this.root);
+  nodesArray(): Id[] {
+    const nodes = this.childrenArray();
+    if (this.root) {
+      nodes.push(this.root)
+    }
     return nodes;
   }
 
@@ -418,53 +414,63 @@ class Arbor {
    * number of nodes and m the number of ends.
    */
   partition() {
-    var be = this.findBranchAndEndNodes(),
-      ends = be.ends,
-      branches = be.branches,
-      partitions = new Array(ends.length),
-      next = 0,
-      junctions = {};
-
-    var open = new Array(ends.length);
-    for (var k = 0; k < ends.length; ++k) open[k] = [ends[k]];
+    const be = this.findBranchAndEndNodes();
+    const open: Id[][] = be.ends.map(end => [end]);
+    const partitions = new Array(open.length)
+    const { branches } = be;
+    let next = 0;
+    const junctions = new Map();
 
     while (open.length > 0) {
-      var seq = open.shift(),
-        node = seq[seq.length - 1],
-        paren,
-        n_successors;
+      const seq = open.shift();
+      if (!seq) {
+        continue
+      }
+
+      let node = seq[seq.length - 1];
+      let parent;
+      let n_successors;
+
       do {
-        paren = this.edges[node];
-        if (undefined === paren) break; // reached root
-        seq.push(paren);
-        n_successors = branches[paren];
-        node = paren;
+        parent = this.edges.get(node);
+        if (!parent) {
+          // reached root
+          break;
+        }
+        seq.push(parent);
+        n_successors = branches.get(parent);
+        node = parent;
       } while (undefined === n_successors);
 
-      if (undefined === paren) {
+      if (!parent) {
         // Reached the root
         partitions[next++] = seq;
       } else {
         // Reached a branch node
-        var junction = junctions[node];
-        if (undefined === junction) {
-          junctions[node] = [seq];
+        const junction = junctions.get(node);
+        if (!junction) {
+          junctions.set(node, [seq]);
         } else {
           junction.push(seq);
           if (junction.length === n_successors) {
             // Append longest to open, and all others to partitions
-            var max = 0,
-              ith = 0;
-            for (var k = 0; k < junction.length; ++k) {
-              var len = junction[k].length;
+            let max = 0;
+            let maxIdx = 0;
+
+            for (let [idx, junc] of junction.entries()) {
+              const len = junc.length;
               if (len > max) {
                 max = len;
-                ith = k;
+                maxIdx = idx;
               }
             }
+
             for (var k = 0; k < junction.length; ++k) {
-              if (k === ith) open.push(junction[k]);
-              else partitions[next++] = junction[k];
+              if (k === maxIdx) {
+                open.push(junction[k]);
+              } else {
+                partitions[next++] = junction[k];
+              }
             }
           }
         }
@@ -479,40 +485,35 @@ class Arbor {
    * large.
    */
   partitionSorted() {
-    return this.partition().sort(function(a, b) {
-      var da = a.length,
-        db = b.length;
-      return da === db ? 0 : da < db ? -1 : 1;
-    });
+    return this.partition().sort((a: any[], b: any[]) => a.length - b.length);
   }
 
   /**
    * Returns an array of child nodes in O(n) time. See also this.allSuccessors()
    * to get them all in one single shot at O(n) time.
    */
-  successors(node) {
-    var edges = this.edges,
-      children = this.childrenArray(),
-      a = [];
-    for (var i = 0; i < children.length; ++i) {
-      var child = children[i];
-      if (edges[child] === node) a.push(child);
+  successors(node: Id) {
+    const succ = [];
+
+    for (let [child, parent] of this.edges.entries()) {
+      if (parent === node) {
+        succ.push(child);
+      }
     }
-    return a;
+    return succ;
   }
 
   /**
    * Returns an array of child nodes plus the parent node in O(n) time. See also
    * this.allNeighbors() to get them all in one single shot at O(2n) time.
    */
-  neighbors(node) {
-    var edges = this.edges,
-      children = this.childrenArray(),
-      paren = this.edges[node],
-      neighbors = undefined === paren ? [] : [paren];
-    for (var i = 0; i < children.length; ++i) {
-      var child = children[i];
-      if (edges[child] === node) neighbors.push(child);
+  neighbors(node: Id) {
+    const neighbors = this.successors(node);
+
+    const parent = this.edges.get(node);
+    if (parent !== undefined) {
+      // n.b. different order to arbor.js
+      neighbors.push(parent);
     }
     return neighbors;
   }
